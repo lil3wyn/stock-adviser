@@ -57,3 +57,64 @@ symbol = st.text_input("Nhập mã cổ phiếu:", value="FPT").upper()
 
 if st.button("🚀 BẮT ĐẦU PHÂN TÍCH"):
     debug_box = st.expander("Xem nhật ký chạy (Logs)", expanded=True)
+    
+    # --- BƯỚC 1 ---
+    debug_box.write("1️⃣ Bắt đầu tải dữ liệu...")
+    try:
+        df = get_data_safe(symbol)
+        if df is None:
+            st.error("❌ Không tải được dữ liệu. Kiểm tra lại mã cổ phiếu hoặc nguồn dữ liệu.")
+            st.stop()
+        debug_box.write(f"✅ Đã tải được {len(df)} dòng dữ liệu.")
+    except Exception as e:
+        st.error(f"❌ Chết ở Bước 1: {e}")
+        st.stop()
+        
+    # --- BƯỚC 2 ---
+    debug_box.write("2️⃣ Đang vẽ biểu đồ...")
+    try:
+        price = df.iloc[-1]['close']
+        st.metric("Giá hiện tại", f"{price:,.0f}")
+        
+        fig = go.Figure()
+        fig.add_trace(go.Candlestick(x=df['time'], open=df['open'], high=df['high'], low=df['low'], close=df['close'], name="Giá"))
+        st.plotly_chart(fig, use_container_width=True)
+        debug_box.write("✅ Vẽ biểu đồ xong.")
+    except Exception as e:
+        st.error(f"❌ Chết ở Bước 2 (Vẽ hình): {e}")
+        st.stop()
+
+    # --- BƯỚC 3 ---
+    debug_box.write("3️⃣ Đang gọi AI (Gemini)...")
+    if not api_key:
+        st.warning("⚠️ Chưa có API Key nên bỏ qua bước AI.")
+    else:
+        try:
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel("gemini-1.5-flash") # Dùng bản ổn định nhất để test
+            
+            # Kiểm tra xem model có sống không
+            try:
+                debug_box.write("...Đang thử kết nối Google...")
+                models = list(genai.list_models())
+                debug_box.write("✅ Kết nối Google OK.")
+            except:
+                st.warning("⚠️ Key sai hoặc Google chặn kết nối.")
+            
+            # Gửi Prompt
+            prompt = f"Phân tích ngắn gọn xu hướng giá cổ phiếu {symbol} giá {price}."
+            resp = model.generate_content(prompt)
+            
+            if resp.text:
+                st.success("🤖 AI Trả lời:")
+                st.write(resp.text)
+                debug_box.write("✅ AI chạy xong.")
+            else:
+                st.error("AI trả về rỗng.")
+                
+        except Exception as e:
+            # Quan trọng: Bắt lỗi API mà không làm sập App
+            st.error(f"❌ Chết ở Bước 3 (AI): {e}")
+            debug_box.write("Gợi ý: Nếu lỗi 404/400 thì đổi Model khác.")
+
+    st.balloons()
