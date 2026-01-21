@@ -2,7 +2,7 @@ import streamlit as st
 import time
 
 # --- 1. CẤU HÌNH TRANG ---
-st.set_page_config(layout="wide", page_title="TA Alex 2026", page_icon="💎")
+st.set_page_config(layout="wide", page_title="TA Alex 2026 Pro", page_icon="💎")
 
 # --- 2. KHO KEY VÔ HẠN (5 KEYS) ---
 API_KEY_POOL = [
@@ -35,7 +35,7 @@ def call_ai_rotation(prompt):
                 safety = [{"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}]
                 response = model.generate_content(prompt, safety_settings=safety)
                 if response.text:
-                    return response.text, f"{model_name} (Key {i+1})"
+                    return response.text, f"{model_name}"
             except: continue
     return "❌ Mạng nghẽn, AI chưa trả lời kịp.", "Error"
 
@@ -71,7 +71,8 @@ def get_data_safe(symbol):
 st.sidebar.title("💎 TA Alex 2026")
 st.sidebar.success(f"✅ Đã nạp {len(API_KEY_POOL)} Key Vô Hạn")
 
-tab1, tab2 = st.tabs(["📊 Phân Tích", "🚀 Scanner (Full)"])
+# TẠO 3 TAB
+tab1, tab2, tab3 = st.tabs(["📊 Phân Tích", "🚀 Scanner VN30", "💬 Chat AI"])
 
 # === TAB 1: PHÂN TÍCH ===
 with tab1:
@@ -115,16 +116,16 @@ with tab1:
         except Exception as e:
             st.error(f"Lỗi: {e}")
 
-# === TAB 2: SCANNER (ĐÃ SỬA LẠI FULL TÍNH NĂNG) ===
+# === TAB 2: SCANNER VN30 (FULL LIST) ===
 with tab2:
-    st.header("🕵️ Quét Cổ Phiếu")
+    st.header("🕵️ Quét Toàn Bộ VN30")
     
-    # 1. Cho nhập list dài thoả thích
-    default_list = "ACB, FPT, HPG, MBB, MSN, MWG, SSI, STB, TCB, VHM, VIC, VNM, VPB, DIG, CEO, DXG"
-    scan_input = st.text_area("Nhập danh sách mã (cách nhau dấu phẩy):", value=default_list, height=100)
+    # DANH SÁCH VN30 MẶC ĐỊNH
+    vn30_list = "ACB, BCM, BID, BVH, CTG, FPT, GAS, GVR, HDB, HPG, MBB, MSN, MWG, PLX, PNJ, POW, SAB, SHB, SSB, SSI, STB, TCB, TPB, VCB, VHM, VIB, VIC, VJC, VNM, VPB, VRE"
     
-    if st.button("🚀 Quét Toàn Bộ"):
-        # Tách chuỗi thành list
+    scan_input = st.text_area("Danh sách mã:", value=vn30_list, height=100)
+    
+    if st.button("🚀 Quét VN30 Ngay"):
         symbols = [s.strip().upper() for s in scan_input.split(",") if s.strip()]
         results = []
         
@@ -133,25 +134,21 @@ with tab2:
         status_text = st.empty()
         
         for i, sym in enumerate(symbols):
-            status_text.text(f"Đang soi: {sym}...")
+            status_text.text(f"Đang soi: {sym} ({i+1}/{len(symbols)})...")
             try:
                 d = get_data_safe(sym)
                 if d is not None:
                     r = d.iloc[-1]
                     
-                    # --- Logic Chấm Điểm ---
+                    # Logic Chấm Điểm
                     score = 0
                     reasons = []
                     
-                    # 1. Xu hướng
                     if r['close'] > r['MA20']: score += 1
                     if r['MA20'] > r['MA50']: score += 1; reasons.append("Uptrend")
-                    
-                    # 2. Động lượng
                     if r['MACD'] > r['Signal_Line']: score += 1.5; reasons.append("MACD cắt lên")
                     if 40 < r['RSI'] < 60: score += 0.5
                     
-                    # Xếp loại
                     rank = "Yếu"
                     if score >= 3.5: rank = "🔥 Khỏe"
                     elif score >= 2: rank = "😐 Trung"
@@ -165,37 +162,60 @@ with tab2:
                     })
             except: pass
             
-            # Cập nhật thanh tiến trình
             bar.progress((i + 1) / len(symbols))
             
         status_text.empty()
         bar.empty()
         
-        # HIỂN THỊ KẾT QUẢ
         if results:
             df_res = pd.DataFrame(results).sort_values(by="Điểm", ascending=False)
             
-            # Tô màu cho đẹp
             def highlight(val):
                 if "Khỏe" in str(val): return 'background-color: #d4edda; color: black'
                 return ''
             
             st.dataframe(df_res.style.applymap(highlight, subset=['Xếp loại']), use_container_width=True)
             
-            # --- AI KHUYẾN NGHỊ (ĐÃ CÓ LẠI) ---
+            # AI KHUYẾN NGHỊ
             top_stock = df_res.iloc[0]
             st.markdown("---")
-            st.subheader(f"🏆 Alex chọn ngôi sao sáng nhất: {top_stock['Mã']}")
+            st.subheader(f"🏆 VN30 Champion: {top_stock['Mã']}")
             
-            with st.spinner("Alex đang viết bài phân tích chi tiết..."):
+            with st.spinner("Alex đang viết bài phân tích..."):
                 prompt = f"""
-                Dựa trên kết quả quét: {top_stock['Mã']} có điểm kỹ thuật cao nhất ({top_stock['Điểm']} điểm).
-                Lý do kỹ thuật: {top_stock['Lý do']}.
-                Giá hiện tại: {top_stock['Giá']}.
-                Hãy viết một khuyến nghị MUA ngắn gọn, bao gồm điểm cắt lỗ và chốt lời dự kiến.
+                Tôi vừa quét xong VN30. Mã {top_stock['Mã']} đứng đầu với {top_stock['Điểm']} điểm.
+                Lý do: {top_stock['Lý do']}. Giá: {top_stock['Giá']}.
+                Hãy viết khuyến nghị đầu tư ngắn gọn cho mã này.
                 """
                 ai_reply, model_used = call_ai_rotation(prompt)
                 st.write(ai_reply)
-                st.caption(f"(Phân tích bởi {model_used})")
-        else:
-            st.warning("Không quét được mã nào. Kiểm tra lại danh sách nhé.")
+
+# === TAB 3: CHAT AI (MỚI) ===
+with tab3:
+    st.header("💬 Trò chuyện với Alex (AI)")
+    st.caption("Hỏi về kiến thức chứng khoán, code, hay đời sống đều được.")
+
+    # Khởi tạo lịch sử chat
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    # Hiển thị lịch sử cũ
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    # Ô nhập liệu chat
+    if prompt := st.chat_input("Nhập câu hỏi của bạn..."):
+        # Hiện câu hỏi người dùng
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        # AI trả lời
+        with st.chat_message("assistant"):
+            with st.spinner("Đang suy nghĩ..."):
+                response, _ = call_ai_rotation(prompt)
+                st.markdown(response)
+        
+        # Lưu câu trả lời
+        st.session_state.messages.append({"role": "assistant", "content": response})
