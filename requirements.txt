@@ -4,5 +4,6 @@ google-generativeai
 plotly
 pandas
 beautifulsoup4
-lxml
 requests
+lxml
+ipython
