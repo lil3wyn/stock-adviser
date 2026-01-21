@@ -1,121 +1,94 @@
 import streamlit as st
 
-# --- 1. CẤU HÌNH TRANG (LUÔN ĐỂ DÒNG 1) ---
-st.set_page_config(layout="wide", page_title="TA Alex Debug", page_icon="🛠️")
-
-st.title("🛠️ Chế độ Sửa Lỗi (Debug Mode)")
-st.caption("Nếu gặp lỗi, nó sẽ hiện ra chi tiết ở dưới thay vì trắng xóa màn hình.")
+# --- 1. CẤU HÌNH TRANG (BẮT BUỘC Ở DÒNG ĐẦU) ---
+st.set_page_config(layout="wide", page_title="TA Alex Pro", page_icon="💎")
 
 # --- 2. NẠP THƯ VIỆN AN TOÀN ---
-status = st.empty()
 try:
-    status.info("⏳ Đang nạp thư viện...")
     import pandas as pd
     import plotly.graph_objects as go
     import google.generativeai as genai
     from vnstock import stock_historical_data
     from datetime import datetime, timedelta
-    status.success("✅ Nạp thư viện thành công!")
     import time
-    time.sleep(1)
-    status.empty()
 except Exception as e:
-    st.error(f"❌ Lỗi nạp thư viện: {e}")
+    st.error(f"❌ Lỗi thư viện: {e}")
     st.stop()
 
-# --- 3. HÀM XỬ LÝ (CÓ BẮT LỖI) ---
-def get_data_safe(symbol):
+# --- 3. CÁC HÀM XỬ LÝ DỮ LIỆU ---
+@st.cache_data(ttl=300) 
+def get_data_safe(symbol, days=365):
     try:
-        # Lấy thử 100 ngày (ngắn thôi cho nhẹ)
         end = datetime.now().strftime('%Y-%m-%d')
-        start = (datetime.now() - timedelta(days=100)).strftime('%Y-%m-%d')
+        start = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
         
-        # Thử nguồn DNSE
+        # Thử lấy dữ liệu từ DNSE
         df = stock_historical_data(symbol=symbol, start_date=start, end_date=end, resolution='1D', type='stock', source='DNSE')
         
+        # Nếu lỗi, thử TCBS
         if df is None or df.empty:
-            # Nếu DNSE lỗi, thử nguồn TCBS dự phòng
-            st.warning("⚠️ Nguồn DNSE không trả về dữ liệu, đang thử TCBS...")
             df = stock_historical_data(symbol=symbol, start_date=start, end_date=end, resolution='1D', type='stock', source='TCBS')
             
         if df is not None and not df.empty:
             df['time'] = pd.to_datetime(df['time'])
-            # Tính toán nhẹ
+            
+            # Chỉ báo xu hướng
             df['MA20'] = df['close'].rolling(window=20).mean()
+            df['MA50'] = df['close'].rolling(window=50).mean()
+            
+            # Bollinger Bands
+            std = df['close'].rolling(window=20).std()
+            df['BB_Upper'] = df['MA20'] + (std * 2)
+            df['BB_Lower'] = df['MA20'] - (std * 2)
+            
+            # RSI
+            delta = df['close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            df['RSI'] = 100 - (100 / (1 + rs))
+            
+            # MACD
+            exp12 = df['close'].ewm(span=12, adjust=False).mean()
+            exp26 = df['close'].ewm(span=26, adjust=False).mean()
+            df['MACD'] = exp12 - exp26
+            df['Signal_Line'] = df['MACD'].ewm(span=9, adjust=False).mean()
+            
+            # Volume
+            df['Vol_MA20'] = df['volume'].rolling(window=20).mean()
+            df['Vol_Ratio'] = df['volume'] / df['Vol_MA20']
+            
             return df
         return None
-    except Exception as e:
-        st.error(f"Lỗi hàm get_data: {e}")
-        return None
+    except: return None
 
-# --- 4. GIAO DIỆN CHÍNH ---
-api_key = st.sidebar.text_input("Gemini API Key", type="password")
+def get_live_price(symbol):
+    try:
+        end = datetime.now().strftime('%Y-%m-%d')
+        start = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d')
+        df = stock_historical_data(symbol=symbol, start_date=start, end_date=end, resolution='1m', type='stock', source='DNSE')
+        if df is not None and not df.empty:
+            return float(df.iloc[-1]['close'])
+        return None
+    except: return None
+
+# --- 4. SIDEBAR & CẤU HÌNH AI ---
+st.sidebar.title("💎 TA Alex Pro")
+
+# Tự động nhận Key
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
+    st.sidebar.success("✅ Đã kích hoạt bản quyền")
+else:
+    api_key = st.sidebar.text_input("Nhập Gemini API Key", type="password")
 
-symbol = st.text_input("Nhập mã cổ phiếu:", value="MBB").upper()
-
-if st.button("🚀 BẮT ĐẦU PHÂN TÍCH"):
-    debug_box = st.expander("Xem nhật ký chạy (Logs)", expanded=True)
-    
-    # --- BƯỚC 1 ---
-    debug_box.write("1️⃣ Bắt đầu tải dữ liệu...")
+# Tự động chọn Model sống (QUAN TRỌNG: Lọc bỏ model 1.5 đã chết)
+available_models = []
+if api_key:
+    genai.configure(api_key=api_key)
     try:
-        df = get_data_safe(symbol)
-        if df is None:
-            st.error("❌ Không tải được dữ liệu. Kiểm tra lại mã cổ phiếu hoặc nguồn dữ liệu.")
-            st.stop()
-        debug_box.write(f"✅ Đã tải được {len(df)} dòng dữ liệu.")
-    except Exception as e:
-        st.error(f"❌ Chết ở Bước 1: {e}")
-        st.stop()
-        
-    # --- BƯỚC 2 ---
-    debug_box.write("2️⃣ Đang vẽ biểu đồ...")
-    try:
-        price = df.iloc[-1]['close']
-        st.metric("Giá hiện tại", f"{price:,.0f}")
-        
-        fig = go.Figure()
-        fig.add_trace(go.Candlestick(x=df['time'], open=df['open'], high=df['high'], low=df['low'], close=df['close'], name="Giá"))
-        st.plotly_chart(fig, use_container_width=True)
-        debug_box.write("✅ Vẽ biểu đồ xong.")
-    except Exception as e:
-        st.error(f"❌ Chết ở Bước 2 (Vẽ hình): {e}")
-        st.stop()
-
-    # --- BƯỚC 3 ---
-    debug_box.write("3️⃣ Đang gọi AI (Gemini)...")
-    if not api_key:
-        st.warning("⚠️ Chưa có API Key nên bỏ qua bước AI.")
-    else:
-        try:
-            genai.configure(api_key=api_key)
-            # Tự động tìm model sống
-            valid_model = "gemini-1.5-flash"
-            try:
-                 for m in genai.list_models():
-                     if 'generateContent' in m.supported_generation_methods:
-                         if "flash" in m.name: valid_model = m.name; break
-            except: pass
-            
-            debug_box.write(f"...Đang dùng model: {valid_model}")
-            model = genai.GenerativeModel(valid_model)
-            
-            # Gửi Prompt
-            prompt = f"Phân tích ngắn gọn xu hướng giá cổ phiếu {symbol} giá {price}."
-            resp = model.generate_content(prompt)
-            
-            if resp.text:
-                st.success("🤖 AI Trả lời:")
-                st.write(resp.text)
-                debug_box.write("✅ AI chạy xong.")
-            else:
-                st.error("AI trả về rỗng.")
-                
-        except Exception as e:
-            # Quan trọng: Bắt lỗi API mà không làm sập App
-            st.error(f"❌ Chết ở Bước 3 (AI): {e}")
-            debug_box.write("Gợi ý: Nếu lỗi 404/400 thì đổi Model khác.")
-
-    st.balloons()
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                name = m.name.replace("models/", "")
+                # Chỉ lấy những model đời mới (tránh lỗi 404 của bản 1.5)
+                if
