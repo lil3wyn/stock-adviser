@@ -1,13 +1,14 @@
 import streamlit as st
+# --- 1. QUAN TRỌNG: CẤU HÌNH TRANG PHẢI NẰM ĐẦU TIÊN ---
+# (Chuyển dòng này lên đây để tránh lỗi màn hình trắng)
+st.set_page_config(layout="wide", page_title="TA Alex Pro Advisor", page_icon="📈")
+
 import pandas as pd
 import plotly.graph_objects as go
 import google.generativeai as genai
 from vnstock import stock_historical_data
 from datetime import datetime, timedelta
 import time
-
-# --- 1. CẤU HÌNH ---
-st.set_page_config(layout="wide", page_title="TA Alex Pro Advisor", page_icon="📈")
 
 # --- 2. HÀM TÍNH TOÁN KỸ THUẬT NÂNG CAO ---
 def calculate_indicators(df):
@@ -16,7 +17,6 @@ def calculate_indicators(df):
     # 1. Basic Trend
     df['MA20'] = df['close'].rolling(window=20).mean()
     df['MA50'] = df['close'].rolling(window=50).mean()
-    df['MA200'] = df['close'].rolling(window=200).mean()
     
     # 2. Bollinger Bands
     std = df['close'].rolling(window=20).std()
@@ -153,9 +153,114 @@ with tab1:
                     3. Kết luận: MUA GOM / MUA ĐUỔI / CHỐT LỜI / CẮT LỖ.
                     """
                     
+                    # Safety Settings (Quan trọng)
+                    safety_settings = [
+                        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+                    ]
+
                     try:
                         model = genai.GenerativeModel(model_name)
                         with st.spinner("Đang kích hoạt não bộ AI..."):
-                            resp = model.generate_content(sys_prompt)
-                            st.success(resp.text)
+                            resp = model.generate_content(sys_prompt, safety_settings=safety_settings)
+                            if resp.text:
+                                st.success(resp.text)
+                            else:
+                                st.warning("AI không phản hồi.")
                     except Exception as e: st.error(str(e))
+
+# === TAB 2: PRO SCANNER ===
+with tab2:
+    st.header("🕵️ Máy Quét Cơ Hội (Scoring System)")
+    st.caption("Chấm điểm sức mạnh kỹ thuật (Technical Rating) trên thang 10.")
+    
+    default_list = "ACB, FPT, HPG, MBB, MSN, MWG, PNJ, SSI, STB, TCB, VHM, VIC, VNM, VPB, DIG, CEO, DXG, VND, SHS"
+    scan_list = st.text_area("Danh sách mã:", value=default_list)
+    
+    if st.button("🔍 Quét & Chấm điểm", type="primary"):
+        symbols = [s.strip().upper() for s in scan_list.split(",") if s.strip()]
+        results = []
+        bar = st.progress(0)
+        
+        with st.spinner("Đang tính toán MACD, RSI, Volume Flow..."):
+            for i, sym in enumerate(symbols):
+                df = get_stock_data(sym, days=150)
+                if df is not None:
+                    row = df.iloc[-1]
+                    
+                    # --- HỆ THỐNG CHẤM ĐIỂM (ALGO) ---
+                    score = 0
+                    reasons = []
+                    
+                    # 1. Điểm Xu hướng (MA) - Max 3 điểm
+                    if row['close'] > row['MA20']: score += 1; reasons.append("Trên MA20")
+                    if row['MA20'] > row['MA50']: score += 1; reasons.append("Trend Tăng Trung Hạn")
+                    if 'MA200' in row and row['close'] > row['MA200']: score += 1
+                    
+                    # 2. Điểm Động lượng (RSI & MACD) - Max 3 điểm
+                    if 45 < row['RSI'] < 70: score += 1
+                    if row['MACD'] > row['Signal_Line']: score += 1.5; reasons.append("MACD Báo Mua")
+                    elif row['MACD'] > 0: score += 0.5
+                    
+                    # 3. Điểm Dòng tiền (Volume) - Max 2 điểm
+                    if row['Vol_Ratio'] > 1.2: score += 1.5; reasons.append(f"Tiền vào mạnh (x{row['Vol_Ratio']:.1f})")
+                    elif row['Vol_Ratio'] > 1.0: score += 0.5
+                    
+                    # 4. Điểm Đột phá (Breakout) - Max 2 điểm
+                    if row['close'] >= df['close'].tail(20).max(): score += 2; reasons.append("Breakout Đỉnh 20 ngày")
+
+                    # Xếp loại
+                    rank = "Yếu"
+                    if score >= 7: rank = "💎 SIÊU CỔ"
+                    elif score >= 5: rank = "🔥 Khỏe"
+                    elif score >= 3: rank = "😐 Trung tính"
+                    
+                    results.append({
+                        "Mã": sym,
+                        "Giá": row['close'],
+                        "Điểm (10)": round(score, 1),
+                        "Xếp loại": rank,
+                        "RSI": round(row['RSI'], 1),
+                        "Lý do chính": ", ".join(reasons[:2])
+                    })
+                bar.progress((i+1)/len(symbols))
+                
+        if results:
+            res_df = pd.DataFrame(results).sort_values(by="Điểm (10)", ascending=False)
+            
+            # Tô màu bảng kết quả
+            def color_rank(val):
+                if "SIÊU" in val: return 'background-color: #28a745; color: white' 
+                if "Khỏe" in val: return 'background-color: #90ee90; color: black'
+                if "Yếu" in val: return 'background-color: #ffcccc; color: black'
+                return ''
+
+            # Dùng applymap (phiên bản cũ cho chắc ăn)
+            st.dataframe(res_df.style.applymap(color_rank, subset=['Xếp loại']), use_container_width=True)
+            
+            # AI Nhận xét
+            top_stocks = res_df.head(3)
+            if not top_stocks.empty:
+                st.markdown("---")
+                st.subheader(f"🏆 Alex chọn: {top_stocks.iloc[0]['Mã']}")
+                prompt = f"""
+                Dựa trên bảng điểm kỹ thuật này:
+                {top_stocks.to_string()}
+                
+                Hãy phân tích kỹ thuật nhanh cho mã đứng đầu (Top 1).
+                Tại sao nó lại có điểm số cao như vậy?
+                """
+                
+                # Safety Settings cho phần Scanner
+                safety_settings = [
+                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+                ]
+                
+                try:
+                    model = genai.GenerativeModel(model_name)
+                    resp = model.generate_content(prompt, safety_settings=safety_settings)
+                    st.write(resp.text)
+                except: pass
