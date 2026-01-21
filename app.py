@@ -53,7 +53,7 @@ api_key = st.sidebar.text_input("Gemini API Key", type="password")
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
 
-symbol = st.text_input("Nhập mã cổ phiếu:", value="FPT").upper()
+symbol = st.text_input("Nhập mã cổ phiếu:", value="MBB").upper()
 
 if st.button("🚀 BẮT ĐẦU PHÂN TÍCH"):
     debug_box = st.expander("Xem nhật ký chạy (Logs)", expanded=True)
@@ -91,15 +91,16 @@ if st.button("🚀 BẮT ĐẦU PHÂN TÍCH"):
     else:
         try:
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel("gemini-1.5-flash") # Dùng bản ổn định nhất để test
-            
-            # Kiểm tra xem model có sống không
+            # Tự động tìm model sống
+            valid_model = "gemini-1.5-flash"
             try:
-                debug_box.write("...Đang thử kết nối Google...")
-                models = list(genai.list_models())
-                debug_box.write("✅ Kết nối Google OK.")
-            except:
-                st.warning("⚠️ Key sai hoặc Google chặn kết nối.")
+                 for m in genai.list_models():
+                     if 'generateContent' in m.supported_generation_methods:
+                         if "flash" in m.name: valid_model = m.name; break
+            except: pass
+            
+            debug_box.write(f"...Đang dùng model: {valid_model}")
+            model = genai.GenerativeModel(valid_model)
             
             # Gửi Prompt
             prompt = f"Phân tích ngắn gọn xu hướng giá cổ phiếu {symbol} giá {price}."
