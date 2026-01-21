@@ -1,7 +1,8 @@
 streamlit
-pandas
-plotly
+vnstock==0.2.9.2.3
 google-generativeai
-vnstock
+plotly
+pandas
 beautifulsoup4
-ipython
+lxml
+requests
