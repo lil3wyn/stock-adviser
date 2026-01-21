@@ -10,11 +10,10 @@ st.set_page_config(layout="wide", page_title="TA Alex Stock Advisor", page_icon=
 
 # --- 2. HÀM DỮ LIỆU ---
 def get_stock_data(symbol, days=365):
-    end_date = datetime.now().strftime('%Y-%m-%d')
-    start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+    end = datetime.now().strftime('%Y-%m-%d')
+    start = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
     try:
-        # Source DNSE ổn định
-        df = stock_historical_data(symbol=symbol, start_date=start_date, end_date=end_date, resolution='1D', type='stock', source='DNSE')
+        df = stock_historical_data(symbol=symbol, start_date=start, end_date=end, resolution='1D', type='stock', source='DNSE')
         if df is not None and not df.empty:
             df['time'] = pd.to_datetime(df['time'])
             df['MA20'] = df['close'].rolling(window=20).mean()
@@ -41,10 +40,9 @@ def get_live_price_1m(symbol):
         return None
     except: return None
 
-# --- 3. SIDEBAR (AUTO-DETECT CHUẨN 2026) ---
+# --- 3. SIDEBAR ---
 st.sidebar.title("⚙️ Cấu hình")
 
-# Lấy Key từ Secrets hoặc nhập tay
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
     st.sidebar.success("✅ Bản quyền: Đã kích hoạt")
@@ -60,22 +58,18 @@ available_models = []
 if api_key:
     genai.configure(api_key=api_key)
     try:
-        # Lấy danh sách thực tế từ Google (để tránh model chết 404)
         for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
                 name = m.name.replace("models/", "")
-                # Lọc bỏ các model cũ hoặc bị khóa
                 if "1.0" not in name and "1.5" not in name: 
                     available_models.append(name)
     except: pass
 
 if available_models:
-    # Ưu tiên bản 3.0 flash hoặc mới nhất
     available_models.sort(key=lambda x: ('3' not in x, 'flash' not in x))
     model_name = st.sidebar.selectbox("Model khả dụng:", available_models, index=0)
     st.sidebar.success(f"🚀 Đang dùng: {model_name}")
 else:
-    # Fallback nếu không quét được
     model_name = st.sidebar.selectbox("Model:", ["gemini-2.0-flash-exp"], index=0)
 
 st.sidebar.markdown("---")
@@ -118,9 +112,56 @@ if symbol and api_key:
         fig.add_trace(go.Candlestick(x=df_daily.tail(60)['time'],
             open=df_daily.tail(60)['open'], high=df_daily.tail(60)['high'],
             low=df_daily.tail(60)['low'], close=df_daily.tail(60)['close'], name="Giá"))
-        if show_ma20: fig.add_trace(go.Scatter(x=df_daily.tail(60)['time'], y=df_daily.tail(60)['MA20'], line=dict(color='orange'), name="MA20"))
+        
+        if show_ma20: 
+            fig.add_trace(go.Scatter(x=df_daily.tail(60)['time'], y=df_daily.tail(60)['MA20'], line=dict(color='orange'), name="MA20"))
+        
         if show_bb:
-             fig.add_trace(go.Scatter(x=df_daily.tail(60)['time'], y=df_daily.tail(60)['BB_Upper'], line=dict(color='gray', dash='dot'), name="Up"))
-             fig.add_trace(go.Scatter(x=df_daily.tail(60)['time'], y=df_daily.tail(60)['BB_Lower'], line=dict(color='gray', dash='dot'), name="Low", fill='tonexty', fillcolor='rgba(200,200,200,0.1)'))
+             fig.add_trace(go.Scatter(x=df_daily.tail(60)['time'], y=df_daily.tail(60)['BB_Upper'], line=dict(color='gray', dash='dot'), name="Upper"))
+             fig.add_trace(go.Scatter(x=df_daily.tail(60)['time'], y=df_daily.tail(60)['BB_Lower'], line=dict(color='gray', dash='dot'), name="Lower", fill='tonexty', fillcolor='rgba(200,200,200,0.1)'))
+        
         fig.update_layout(xaxis_rangeslider_visible=False, height=500, margin=dict(t=30, b=0, l=0, r=0))
-        st.plotly_chart(fig, use_container
+        
+        # --- ĐÂY LÀ DÒNG BỊ LỖI LÚC NÃY (Đã sửa) ---
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Chatbot
+        st.markdown("---")
+        st.subheader(f"💬 Chat với {model_name}")
+        
+        if "messages" not in st.session_state: st.session_state.messages = []
+        for msg in st.session_state.messages: st.chat_message(msg["role"]).write(msg["content"])
+            
+        if prompt := st.chat_input("Hỏi Alex..."):
+            st.chat_message("user").write(prompt)
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            
+            data_ctx = df_daily.tail(60)[['time', 'close', 'RSI', 'MA20', 'BB_Upper', 'BB_Lower']].to_string(index=False)
+            
+            sys_prompt = f"""
+            Bạn là TA Alex. Model: {model_name}.
+            Dữ liệu {symbol} (60 phiên):
+            {data_ctx}
+            Giá Realtime: {display_price}.
+            User hỏi: {prompt}.
+            Hãy phân tích xu hướng và đưa ra khuyến nghị Mua/Bán.
+            """
+            
+            safety_settings = [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+            ]
+            
+            try:
+                model = genai.GenerativeModel(model_name)
+                with st.spinner("Đang phân tích..."):
+                    resp = model.generate_content(sys_prompt, safety_settings=safety_settings)
+                    if resp.text:
+                        st.chat_message("assistant").write(resp.text)
+                        st.session_state.messages.append({"role": "assistant", "content": resp.text})
+                    else:
+                        st.error("AI không trả lời. Hãy thử model khác.")
+            except Exception as e:
+                st.error(f"Lỗi: {e}")
