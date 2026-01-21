@@ -2,11 +2,10 @@ import streamlit as st
 import time
 import random
 
-# --- 1. KHỞI ĐỘNG ---
-st.set_page_config(layout="wide", page_title="TA Alex Ultimate", page_icon="💎")
+# --- 1. CẤU HÌNH TRANG ---
+st.set_page_config(layout="wide", page_title="TA Alex 2026", page_icon="💎")
 
-# --- 2. KHO VŨ KHÍ (DANH SÁCH 5 API KEY CỦA BẠN) ---
-# Code sẽ tự động lấy key trong này để xoay vòng
+# --- 2. KHO VŨ KHÍ: 5 KEY CỦA BẠN (Đã nạp sẵn) ---
 API_KEY_POOL = [
     "AIzaSyAcIDpmFgBVzIlb41m1cz4BPlTCjKM9Hl0",
     "AIzaSyBC_V9ACvGCElaWQL5BILKQCv_ikBGcsHs", 
@@ -26,43 +25,43 @@ except Exception as e:
     st.error(f"❌ Lỗi thư viện: {e}")
     st.stop()
 
-# --- 4. HÀM GỌI AI THÔNG MINH (TỰ ĐỔI KEY KHI LỖI) ---
-def call_ai_smart_rotation(prompt, model_name="gemini-2.0-flash-exp"):
-    # Tạo danh sách placeholder để hiện thông báo
-    msg_box = st.empty()
+# --- 4. HÀM GỌI AI "BẤT TỬ" (Auto-Rotation) ---
+def call_ai_rotation(prompt):
+    # Danh sách model ưu tiên (2026)
+    # Ưu tiên dùng bản 3.0, nếu chết thì lùi về 2.0
+    models_to_try = ["gemini-3-flash-preview", "gemini-2.0-flash-exp"]
     
-    # Thử từng key trong kho
+    msg = st.empty()
+    
+    # Chiến thuật: Thử từng Key
     for i, key in enumerate(API_KEY_POOL):
-        try:
-            # Cấu hình Key hiện tại
-            genai.configure(api_key=key)
-            
-            # Chọn Model (Tự động fallback nếu model chết)
-            # Ưu tiên model người dùng chọn, nếu lỗi thử model khác
-            active_model = model_name
-            
-            # Gọi AI
-            model = genai.GenerativeModel(active_model)
-            safety = [{"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}]
-            
-            # Gửi yêu cầu
-            response = model.generate_content(prompt, safety_settings=safety)
-            
-            if response.text:
-                msg_box.empty() # Xóa thông báo nếu thành công
-                return response.text
-            
-        except Exception as e:
-            error_msg = str(e)
-            # Nếu lỗi Quota (429) hoặc Lỗi Model (404) -> Đổi Key khác
-            if "429" in error_msg or "Quota" in error_msg or "404" in error_msg:
-                msg_box.warning(f"⚠️ Key số {i+1} bị quá tải (hoặc model lỗi). Đang chuyển sang Key số {i+2}...", icon="🔄")
-                continue # Nhảy sang vòng lặp tiếp theo (Key tiếp theo)
-            else:
-                # Lỗi lạ thì báo luôn
-                return f"❌ Lỗi không xác định: {e}"
+        # Với mỗi Key, thử từng Model
+        for model_name in models_to_try:
+            try:
+                genai.configure(api_key=key)
+                model = genai.GenerativeModel(model_name)
                 
-    return "❌ Tất cả 5 Key đều đã hết lượt dùng hôm nay! (Bạn cày khiếp quá 😅)"
+                # Tắt bộ lọc an toàn để tránh lỗi "finish_reason 1" (trả về rỗng)
+                safety = [{"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}]
+                
+                # Gọi AI
+                response = model.generate_content(prompt, safety_settings=safety)
+                
+                if response.text:
+                    msg.empty()
+                    return response.text, model_name # Trả về kết quả và tên model đã dùng
+                    
+            except Exception as e:
+                err = str(e)
+                # Nếu là lỗi Quota (429) -> Đổi Key khác
+                if "429" in err or "Quota" in err:
+                    msg.warning(f"⚠️ Key {i+1} quá tải. Đang đổi sang Key {i+2}...", icon="🔄")
+                    break # Thoát vòng lặp model để đổi Key mới
+                
+                # Nếu là lỗi Model không tìm thấy (404) hoặc lỗi khác -> Thử model tiếp theo
+                continue 
+
+    return "❌ Tất cả 5 Key đều tạch! Mai quay lại nhé.", "None"
 
 # --- 5. HÀM DỮ LIỆU ---
 @st.cache_data(ttl=300)
@@ -105,12 +104,9 @@ def get_live_price(symbol):
     except: return None
 
 # --- 6. GIAO DIỆN ---
-st.sidebar.title("💎 TA Alex Ultimate")
-st.sidebar.success(f"✅ Đã nạp {len(API_KEY_POOL)} Key dự phòng!")
-st.sidebar.info("Hệ thống sẽ tự động đổi Key nếu bị lỗi.")
-
-# Chọn Model (Đơn giản hóa)
-model_name = st.sidebar.selectbox("Model:", ["gemini-2.0-flash-exp", "gemini-1.5-pro", "gemini-1.5-flash"], index=0)
+st.sidebar.title("💎 TA Alex 2026")
+st.sidebar.success(f"✅ Đã kích hoạt 5 Key Vô Hạn!")
+st.sidebar.info("Mặc định: gemini-3-flash-preview")
 
 tab1, tab2 = st.tabs(["📊 Phân Tích", "🚀 Scanner"])
 
@@ -118,7 +114,7 @@ tab1, tab2 = st.tabs(["📊 Phân Tích", "🚀 Scanner"])
 with tab1:
     col1, col2 = st.columns([1, 3])
     with col1:
-        symbol = st.text_input("Mã cổ phiếu", value="FPT").upper()
+        symbol = st.text_input("Mã cổ phiếu", value="SSI").upper()
     if st.button("🔍 Phân Tích Ngay", type="primary"):
         with st.spinner("Đang tải dữ liệu..."):
             df = get_data_safe(symbol)
@@ -137,18 +133,19 @@ with tab1:
                 fig.add_trace(go.Scatter(x=df.tail(60)['time'], y=df.tail(60)['MA20'], line=dict(color='orange'), name="MA20"))
                 st.plotly_chart(fig, use_container_width=True)
                 
-                # GỌI HÀM XOAY TUA KEY
+                # GỌI AI XOAY TUA
                 data_ctx = df.tail(30)[['time', 'close', 'RSI', 'MACD']].to_string(index=False)
                 prompt = f"Giá {symbol}: {price}. Dữ liệu:\n{data_ctx}\n. Phân tích ngắn gọn Mua/Bán."
                 
-                ai_reply = call_ai_smart_rotation(prompt, model_name)
-                st.success("🤖 Alex nhận định:")
+                ai_reply, used_model = call_ai_rotation(prompt)
+                
+                st.success(f"🤖 Alex ({used_model}) nhận định:")
                 st.write(ai_reply)
             else: st.error("Lỗi mã.")
 
 # TAB 2
 with tab2:
-    st.header("🕵️ Quét Cổ Phiếu (Multi-Key)")
+    st.header("🕵️ Quét Cổ Phiếu")
     scan_list = st.text_area("Danh sách:", value="ACB, FPT, HPG, MBB, MSN, SSI, STB, TCB, VHM, VIC, VNM, VPB")
     if st.button("🚀 Quét"):
         symbols = [s.strip().upper() for s in scan_list.split(",") if s.strip()]
@@ -176,6 +173,7 @@ with tab2:
             top = df_res.iloc[0]
             st.subheader(f"🏆 Top 1: {top['Mã']}")
             
-            # GỌI HÀM XOAY TUA KEY
-            explain = call_ai_smart_rotation(f"Tại sao {top['Mã']} kỹ thuật tốt? Ngắn gọn.", model_name)
+            # GỌI AI XOAY TUA
+            explain, used_model = call_ai_rotation(f"Tại sao {top['Mã']} kỹ thuật tốt? Ngắn gọn.")
+            st.write(f"*(Phân tích bởi {used_model})*")
             st.write(explain)
